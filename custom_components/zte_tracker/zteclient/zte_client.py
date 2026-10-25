@@ -475,10 +475,13 @@ class zteClient:
                 return None
 
             devices: list[dict[str, Any]] = []
-            if lan_devices:
-                devices.extend(lan_devices)
+            # WiFi first, LAN last: duplicates are merged on MAC by the
+            # coordinator, and the LAN table carries more per-device data
+            # (real port, wired/wireless, mesh agent, active flag).
             if wifi_devices:
                 devices.extend(wifi_devices)
+            if lan_devices:
+                devices.extend(lan_devices)
 
             return devices
 
@@ -492,14 +495,20 @@ class zteClient:
             if not self.session:
                 raise RuntimeError("Session not initialized")
 
-            # First request to set up context
-            r = self.session.get(
-                f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
-                verify=self.verify_ssl,
-                timeout=10,
-            )
-            self.log_request(r)
-            r.raise_for_status()
+            # First request to set up context. Not every firmware serves this
+            # tag: the ZTE E2631 (AX3000, vue console) answers 404 here while
+            # accessdev_landevs_lua/localnet_lan_info_lua work fine, so a
+            # failure must not abort the whole LAN branch.
+            try:
+                r = self.session.get(
+                    f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
+                    verify=self.verify_ssl,
+                    timeout=10,
+                )
+                self.log_request(r)
+                r.raise_for_status()
+            except Exception:
+                pass
 
             # Main request for LAN devices
             lan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['lan_script']}&_={self.get_guid()}"
@@ -1312,6 +1321,8 @@ class zteClient:
                     "Port": "",  # LAN port or WLAN ESSID
                     "LinkTime": "",
                     "ConnectTime": "",
+                    "MeshNode": "",
+                    "Interface": "",
                 }
 
                 # Parse device parameters
@@ -1359,6 +1370,11 @@ class zteClient:
                                     device_info["ConnectTime"] = pvalue
                             elif pname == "AliasName":  # Contains the LAN port.
                                 device_info["Port"] = pvalue
+                            elif pname == "ParentDeviceName":
+                                # Mesh agent the client is attached to.
+                                device_info["MeshNode"] = pvalue
+                            elif pname == "Interface":
+                                device_info["Interface"] = pvalue
                             elif (
                                 pname in ("Layer1Interface", "SSID")
                                 and not device_info["Port"]
@@ -1369,6 +1385,11 @@ class zteClient:
                     except (IndexError, AttributeError) as e:
                         _LOGGER.warning("Error parsing device parameter %d: %s", i, e)
                         continue
+
+                # The LAN table labels every client "LAN", so take the real
+                # link type from the interface name when it is available.
+                if str(device_info.get("Interface", "")).lower().startswith("wlan"):
+                    device_info["NetworkType"] = "WLAN"
 
                 # Remap Port from WLAN AP map
                 if device_info["Port"] and device_info["Port"] in wlanap_map:
