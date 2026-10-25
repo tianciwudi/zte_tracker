@@ -350,7 +350,10 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
             current_macs.add(mac)
             device_data = {
-                "name": device.get("HostName", "Unknown"),
+                # DevName is the router's localised device name, far more readable
+                # than the DHCP host name; fall back to the host name when the
+                # firmware sends none.
+                "name": device.get("DevName") or device.get("HostName", "Unknown"),
                 "ip": device.get("IPAddress", ""),
                 "mac": mac,
                 "active": device.get("Active", False),

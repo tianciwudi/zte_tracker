@@ -1312,6 +1312,7 @@ class zteClient:
                     "Port": "",  # LAN port or WLAN ESSID
                     "LinkTime": "",
                     "ConnectTime": "",
+                    "DevName": "",
                 }
 
                 # Parse device parameters
@@ -1359,6 +1360,12 @@ class zteClient:
                                     device_info["ConnectTime"] = pvalue
                             elif pname == "AliasName":  # Contains the LAN port.
                                 device_info["Port"] = pvalue
+                            elif pname == "DevName":
+                                # The router's own name for the device, localised
+                                # ("打印机", "客厅灯"). Some firmwares send "-" when the
+                                # entry has no name at all.
+                                if pvalue not in ("-", "", "unknown", "Unknown"):
+                                    device_info["DevName"] = pvalue
                             elif (
                                 pname in ("Layer1Interface", "SSID")
                                 and not device_info["Port"]
